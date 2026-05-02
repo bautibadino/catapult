@@ -15,31 +15,38 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
       return NextResponse.json({ error: "Import not found" }, { status: 404 });
     }
 
+    // 1. Delete GPS records for this import
     await GpsRecord.deleteMany({ sourceFileId: id });
+
+    // 2. Delete import file
     await ImportFile.findByIdAndDelete(id);
 
-    const orphanedSessions = await Session.find({
-      _id: {
-        $nin: await GpsRecord.distinct("sessionId"),
-      },
+    // 3. Bulk delete orphaned sessions (no GPS records reference them)
+    const activeSessionIds = await GpsRecord.distinct("sessionId");
+    await Session.deleteMany({
+      _id: { $nin: activeSessionIds },
     });
-    for (const s of orphanedSessions) {
-      await Session.findByIdAndDelete(s._id);
-    }
 
-    const orphanedAthletes = await Athlete.find({
-      _id: {
-        $nin: await GpsRecord.distinct("athleteId"),
-      },
+    // 4. Bulk delete orphaned athletes (no GPS records reference them)
+    const activeAthleteIds = await GpsRecord.distinct("athleteId");
+    await Athlete.deleteMany({
+      _id: { $nin: activeAthleteIds },
     });
-    for (const a of orphanedAthletes) {
-      await Athlete.findByIdAndDelete(a._id);
-    }
 
-    const remainingSessions = await Session.find();
-    for (const s of remainingSessions) {
-      const count = await GpsRecord.countDocuments({ sessionId: s._id });
-      await Session.findByIdAndUpdate(s._id, { athleteCount: count });
+    // 5. Update athlete counts for all remaining sessions using aggregation
+    const sessionCounts = await GpsRecord.aggregate([
+      { $group: { _id: "$sessionId", count: { $sum: 1 } } },
+    ]);
+
+    const bulkOps = sessionCounts.map((sc) => ({
+      updateOne: {
+        filter: { _id: sc._id },
+        update: { $set: { athleteCount: sc.count } },
+      },
+    }));
+
+    if (bulkOps.length > 0) {
+      await Session.bulkWrite(bulkOps);
     }
 
     return NextResponse.json({ success: true, deletedId: id });
