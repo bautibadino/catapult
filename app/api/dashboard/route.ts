@@ -55,25 +55,27 @@ export async function GET() {
       { label: "Plantel", value: athleteNames.length, unit: "", sub: "jugadores con datos" },
     ];
 
-    const sessionSummaries = sessions.map((s) => {
-      const sRecords = fullRecords.filter((r) => String(r.sessionId) === String(s._id));
-      return {
-        _id: String(s._id),
-        name: s.name,
-        date: s.date,
-        rival: s.rival,
-        athleteCount: s.athleteCount,
-        promTotal: {
-          dist: avg(getMetricsArray(sRecords, "dist")),
-          m_min: avg(getMetricsArray(sRecords, "m_min")),
-          z5: avg(getMetricsArray(sRecords, "z5")),
-          top_speed: avg(getMetricsArray(sRecords, "top_speed")),
-          a4: avg(getMetricsArray(sRecords, "a4")),
-          d4: avg(getMetricsArray(sRecords, "d4")),
-          pl: avg(getMetricsArray(sRecords, "pl")),
-        },
-      };
-    });
+    const sessionSummaries = sessions
+      .map((s) => {
+        const sRecords = fullRecords.filter((r) => String(r.sessionId) === String(s._id));
+        return {
+          _id: String(s._id),
+          name: s.name,
+          date: s.date,
+          rival: s.rival,
+          athleteCount: sRecords.length,
+          promTotal: {
+            dist: avg(getMetricsArray(sRecords, "dist")),
+            m_min: avg(getMetricsArray(sRecords, "m_min")),
+            z5: avg(getMetricsArray(sRecords, "z5")),
+            top_speed: avg(getMetricsArray(sRecords, "top_speed")),
+            a4: avg(getMetricsArray(sRecords, "a4")),
+            d4: avg(getMetricsArray(sRecords, "d4")),
+            pl: avg(getMetricsArray(sRecords, "pl")),
+          },
+        };
+      })
+      .filter((s) => s.athleteCount > 0 && s.promTotal.dist > 0);
 
     const athleteMap: Record<string, any[]> = {};
     for (const r of fullRecords) {

@@ -228,31 +228,22 @@ export default function DashboardPage() {
             ))}
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <Card className="rounded-xl p-5 bg-white border-[#F0F0F0] shadow-sm">
               <div className="flex items-center justify-between mb-5 pb-4 border-b border-[#F4F4F4]">
                 <div>
-                  <h3 className="text-sm font-bold text-[#0A0A0A]">
-                    Promedio del equipo por fecha
-                  </h3>
-                  <p className="text-xs text-[#A3A3A3] mt-0.5">
-                    Distancia total y relativa
-                  </p>
+                  <h3 className="text-sm font-bold text-[#0A0A0A]">Distancia por fecha</h3>
+                  <p className="text-xs text-[#A3A3A3] mt-0.5">Promedio del equipo (m)</p>
                 </div>
               </div>
-              <div className="h-[300px]">
+              <div className="h-[280px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartDistData}>
+                  <BarChart data={chartDistData} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#F4F4F4" vertical={false} />
-                    <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#A3A3A3" }} axisLine={false} tickLine={false} />
-                    <YAxis yAxisId="left" tick={{ fontSize: 11, fill: "#A3A3A3" }} axisLine={false} tickLine={false} />
-                    <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: "#A3A3A3" }} axisLine={false} tickLine={false} />
-                    <Tooltip
-                      contentStyle={{ borderRadius: 10, border: "1px solid #F0F0F0", fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
-                    />
-                    <Legend wrapperStyle={{ fontSize: 12, paddingTop: 16 }} />
-                    <Bar yAxisId="left" dataKey="dist" name="Distancia total (m)" fill="#F26522" radius={[6, 6, 0, 0]} barSize={32} />
-                    <Line yAxisId="right" type="monotone" dataKey="mmin" name="m/min" stroke="#0A0A0A" strokeWidth={2.5} dot={{ r: 4, fill: "#0A0A0A" }} />
+                    <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#A3A3A3" }} axisLine={false} tickLine={false} interval={0} />
+                    <YAxis tick={{ fontSize: 11, fill: "#A3A3A3" }} axisLine={false} tickLine={false} tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
+                    <Tooltip formatter={(v) => [`${Number(v).toLocaleString("es-AR")} m`, "Distancia"]} contentStyle={{ borderRadius: 10, border: "1px solid #F0F0F0", fontSize: 12 }} />
+                    <Bar dataKey="dist" fill="#F26522" radius={[6, 6, 0, 0]} barSize={40} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -261,22 +252,38 @@ export default function DashboardPage() {
             <Card className="rounded-xl p-5 bg-white border-[#F0F0F0] shadow-sm">
               <div className="flex items-center justify-between mb-5 pb-4 border-b border-[#F4F4F4]">
                 <div>
-                  <h3 className="text-sm font-bold text-[#0A0A0A]">Carga mecánica</h3>
-                  <p className="text-xs text-[#A3A3A3] mt-0.5">
-                    Player Load promedio fecha a fecha
-                  </p>
+                  <h3 className="text-sm font-bold text-[#0A0A0A]">m/min por fecha</h3>
+                  <p className="text-xs text-[#A3A3A3] mt-0.5">Intensidad promedio</p>
                 </div>
               </div>
-              <div className="h-[300px]">
+              <div className="h-[280px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartPLData}>
+                  <LineChart data={chartDistData} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#F4F4F4" vertical={false} />
-                    <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#A3A3A3" }} axisLine={false} tickLine={false} />
+                    <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#A3A3A3" }} axisLine={false} tickLine={false} interval={0} />
+                    <YAxis tick={{ fontSize: 11, fill: "#A3A3A3" }} axisLine={false} tickLine={false} domain={["auto", "auto"]} />
+                    <Tooltip formatter={(v) => [`${Number(v).toFixed(1)} m/min`, "Intensidad"]} contentStyle={{ borderRadius: 10, border: "1px solid #F0F0F0", fontSize: 12 }} />
+                    <Line type="monotone" dataKey="mmin" stroke="#0A0A0A" strokeWidth={3} dot={{ r: 5, fill: "#0A0A0A" }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </Card>
+
+            <Card className="rounded-xl p-5 bg-white border-[#F0F0F0] shadow-sm">
+              <div className="flex items-center justify-between mb-5 pb-4 border-b border-[#F4F4F4]">
+                <div>
+                  <h3 className="text-sm font-bold text-[#0A0A0A]">Carga mecánica</h3>
+                  <p className="text-xs text-[#A3A3A3] mt-0.5">Player Load promedio</p>
+                </div>
+              </div>
+              <div className="h-[280px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartPLData} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#F4F4F4" vertical={false} />
+                    <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#A3A3A3" }} axisLine={false} tickLine={false} interval={0} />
                     <YAxis tick={{ fontSize: 11, fill: "#A3A3A3" }} axisLine={false} tickLine={false} />
-                    <Tooltip
-                      contentStyle={{ borderRadius: 10, border: "1px solid #F0F0F0", fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
-                    />
-                    <Bar dataKey="pl" name="Player Load" fill="rgba(242,101,34,0.85)" radius={[6, 6, 0, 0]} barSize={32} />
+                    <Tooltip formatter={(v) => [`${Number(v).toFixed(0)}`, "Player Load"]} contentStyle={{ borderRadius: 10, border: "1px solid #F0F0F0", fontSize: 12 }} />
+                    <Bar dataKey="pl" fill="rgba(242,101,34,0.85)" radius={[6, 6, 0, 0]} barSize={40} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
