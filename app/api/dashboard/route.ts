@@ -17,6 +17,49 @@ function getMetricsArray(records: any[], key: MetricKey) {
   return records.map((r) => r.metrics[key] || 0);
 }
 
+interface MatchAggregate {
+  dur: number;
+  dist: number;
+  m_min: number;
+  z3: number;
+  z4: number;
+  z5: number;
+  top_speed: number;
+  a23: number;
+  a34: number;
+  a4: number;
+  d23: number;
+  d34: number;
+  d4: number;
+  max_acc: number;
+  max_dec: number;
+  pl: number;
+}
+
+function aggregateMatch(records: any[]): MatchAggregate {
+  // Sum cumulative metrics, max for peaks, weighted avg for rates
+  const dur = sum(records.map((r) => r.metrics.dur));
+  const dist = sum(records.map((r) => r.metrics.dist));
+  const z3 = sum(records.map((r) => r.metrics.z3));
+  const z4 = sum(records.map((r) => r.metrics.z4));
+  const z5 = sum(records.map((r) => r.metrics.z5));
+  const a23 = sum(records.map((r) => r.metrics.a23));
+  const a34 = sum(records.map((r) => r.metrics.a34));
+  const a4 = sum(records.map((r) => r.metrics.a4));
+  const d23 = sum(records.map((r) => r.metrics.d23));
+  const d34 = sum(records.map((r) => r.metrics.d34));
+  const d4 = sum(records.map((r) => r.metrics.d4));
+  const pl = sum(records.map((r) => r.metrics.pl));
+  const top_speed = Math.max(...records.map((r) => r.metrics.top_speed || 0));
+  const max_acc = Math.max(...records.map((r) => r.metrics.max_acc || 0));
+  const max_dec = Math.max(...records.map((r) => r.metrics.max_dec || 0));
+
+  // m/min should be recalculated from totals (not averaged)
+  const m_min = dur > 0 ? dist / dur : 0;
+
+  return { dur, dist, m_min, z3, z4, z5, top_speed, a23, a34, a4, d23, d34, d4, max_acc, max_dec, pl };
+}
+
 export async function GET() {
   try {
     await connectDB();
@@ -36,74 +79,101 @@ export async function GET() {
       });
     }
 
-    const fullRecords = allRecords.filter((r) => r.half === "Full" || !r.half);
+    // All records regardless of half — we aggregate by session
     const ptRecords = allRecords.filter((r) => r.half === "1st Half");
     const stRecords = allRecords.filter((r) => r.half === "2nd Half");
 
-    const distAvg = avg(getMetricsArray(fullRecords, "dist"));
-    const mminAvg = avg(getMetricsArray(fullRecords, "m_min"));
-    const z5Avg = avg(getMetricsArray(fullRecords, "z5"));
-    const topAvg = avg(getMetricsArray(fullRecords, "top_speed"));
-    const plAvg = avg(getMetricsArray(fullRecords, "pl"));
-    const athleteNames = Array.from(new Set(fullRecords.map((r) => r.athleteName)));
+    // --- ATHLETE AGGREGATION BY MATCH ---
+    // athleteName -> sessionId -> records[]
+    const athleteSessionMap: Record<string, Record<string, any[]>> = {};
+    for (const r of allRecords) {
+      const name = r.athleteName;
+      const sid = String(r.sessionId);
+      if (!athleteSessionMap[name]) athleteSessionMap[name] = {};
+      if (!athleteSessionMap[name][sid]) athleteSessionMap[name][sid] = [];
+      athleteSessionMap[name][sid].push(r);
+    }
+
+    const athletes = Object.entries(athleteSessionMap).map(([name, sessionMap]) => {
+      const matchAggregates = Object.values(sessionMap).map((records) => aggregateMatch(records));
+      const firstRecord = Object.values(sessionMap)[0]?.[0];
+
+      return {
+        _id: String(firstRecord?.athleteId || ""),
+        name,
+        pj: matchAggregates.length, // unique sessions = matches played
+        dur: avg(matchAggregates.map((m) => m.dur)),
+        dist: avg(matchAggregates.map((m) => m.dist)),
+        m_min: avg(matchAggregates.map((m) => m.m_min)),
+        z5: avg(matchAggregates.map((m) => m.z5)),
+        top: Math.max(...matchAggregates.map((m) => m.top_speed)),
+        a4: avg(matchAggregates.map((m) => m.a4)),
+        d4: avg(matchAggregates.map((m) => m.d4)),
+        pl: avg(matchAggregates.map((m) => m.pl)),
+      };
+    });
+
+    // --- KPIs (from match aggregates) ---
+    const allMatchAggs: MatchAggregate[] = [];
+    for (const sessionMap of Object.values(athleteSessionMap)) {
+      for (const records of Object.values(sessionMap)) {
+        allMatchAggs.push(aggregateMatch(records));
+      }
+    }
+
+    const distAvg = avg(allMatchAggs.map((m) => m.dist));
+    const mminAvg = avg(allMatchAggs.map((m) => m.m_min));
+    const z5Avg = avg(allMatchAggs.map((m) => m.z5));
+    const topAvg = avg(allMatchAggs.map((m) => m.top_speed));
+    const plAvg = avg(allMatchAggs.map((m) => m.pl));
 
     const kpis = [
       { label: "Distancia / partido", value: distAvg / 1000, unit: "km", sub: `${mminAvg.toFixed(1)} m/min · promedio`, highlight: true },
       { label: "Sprints Z5", value: z5Avg, unit: "m", sub: "distancia >25.2 km/h por partido" },
       { label: "Top Speed promedio", value: topAvg, unit: "km/h", sub: "velocidad máxima del equipo" },
       { label: "Player Load", value: plAvg, unit: "", sub: "carga mecánica promedio" },
-      { label: "Plantel", value: athleteNames.length, unit: "", sub: "jugadores con datos" },
+      { label: "Plantel", value: athletes.length, unit: "", sub: "jugadores con datos" },
     ];
 
+    // --- SESSION SUMMARIES ---
     const sessionSummaries = sessions
       .map((s) => {
-        const sRecords = fullRecords.filter((r) => String(r.sessionId) === String(s._id));
+        const sRecords = allRecords.filter((r) => String(r.sessionId) === String(s._id));
+        // Aggregate per-athlete within session for cleaner averages
+        const sessionAthleteMap: Record<string, any[]> = {};
+        for (const r of sRecords) {
+          if (!sessionAthleteMap[r.athleteName]) sessionAthleteMap[r.athleteName] = [];
+          sessionAthleteMap[r.athleteName].push(r);
+        }
+        const matchAggs = Object.values(sessionAthleteMap).map((recs) => aggregateMatch(recs));
+
         return {
           _id: String(s._id),
           name: s.name,
           date: s.date,
           rival: s.rival,
-          athleteCount: sRecords.length,
+          athleteCount: matchAggs.length,
           promTotal: {
-            dist: avg(getMetricsArray(sRecords, "dist")),
-            m_min: avg(getMetricsArray(sRecords, "m_min")),
-            z5: avg(getMetricsArray(sRecords, "z5")),
-            top_speed: avg(getMetricsArray(sRecords, "top_speed")),
-            a4: avg(getMetricsArray(sRecords, "a4")),
-            d4: avg(getMetricsArray(sRecords, "d4")),
-            pl: avg(getMetricsArray(sRecords, "pl")),
+            dist: avg(matchAggs.map((m) => m.dist)),
+            m_min: avg(matchAggs.map((m) => m.m_min)),
+            z5: avg(matchAggs.map((m) => m.z5)),
+            top_speed: avg(matchAggs.map((m) => m.top_speed)),
+            a4: avg(matchAggs.map((m) => m.a4)),
+            d4: avg(matchAggs.map((m) => m.d4)),
+            pl: avg(matchAggs.map((m) => m.pl)),
           },
         };
       })
       .filter((s) => s.athleteCount > 0);
 
-    const athleteMap: Record<string, any[]> = {};
-    for (const r of fullRecords) {
-      if (!athleteMap[r.athleteName]) athleteMap[r.athleteName] = [];
-      athleteMap[r.athleteName].push(r);
-    }
-
-    const athletes = Object.entries(athleteMap).map(([name, records]) => ({
-      _id: String(records[0].athleteId),
-      name,
-      pj: records.length,
-      dur: sum(records.map((r) => r.metrics.dur)),
-      dist: avg(records.map((r) => r.metrics.dist)),
-      m_min: avg(records.map((r) => r.metrics.m_min)),
-      z5: avg(records.map((r) => r.metrics.z5)),
-      top: Math.max(...records.map((r) => r.metrics.top_speed)),
-      a4: avg(records.map((r) => r.metrics.a4)),
-      d4: avg(records.map((r) => r.metrics.d4)),
-      pl: avg(records.map((r) => r.metrics.pl)),
-    }));
-
-    function makeRanking(key: MetricKey) {
-      const sorted = [...athletes].sort((a, b) => (b as any)[key === "dist" ? "dist" : key === "z5" ? "z5" : "pl"] - (a as any)[key === "dist" ? "dist" : key === "z5" ? "z5" : "pl"]);
-      const maxV = sorted[0] ? (sorted[0] as any)[key === "dist" ? "dist" : key === "z5" ? "z5" : "pl"] : 1;
+    // --- RANKINGS ---
+    function makeRanking(key: "dist" | "z5" | "pl") {
+      const sorted = [...athletes].sort((a, b) => (b as any)[key] - (a as any)[key]);
+      const maxV = sorted[0] ? (sorted[0] as any)[key] : 1;
       return sorted.slice(0, 8).map((a, i) => ({
         rank: i + 1,
         name: a.name,
-        value: (a as any)[key === "dist" ? "dist" : key === "z5" ? "z5" : "pl"],
+        value: (a as any)[key],
         pj: a.pj,
         max: maxV,
       }));
@@ -115,6 +185,7 @@ export async function GET() {
       pl: makeRanking("pl"),
     };
 
+    // --- MERMA ---
     const metricsDef: { key: MetricKey; label: string }[] = [
       { key: "dist", label: "Distancia (m)" },
       { key: "m_min", label: "m/min" },
@@ -141,6 +212,7 @@ export async function GET() {
       };
     });
 
+    // Player-level merma
     const playerMermaMap: Record<string, { dist: number[]; m_min: number[]; z5: number[]; pl: number[]; top: number[]; n: number }> = {};
     const sessionIds = Array.from(new Set(allRecords.map((r) => String(r.sessionId))));
     for (const sid of sessionIds) {
@@ -175,8 +247,9 @@ export async function GET() {
       }))
       .sort((a, b) => a.dist - b.dist);
 
+    // --- BENCHMARKS ---
     const benchmarks = Object.entries(BENCHMARKS).map(([key, b]) => {
-      const val = avg(getMetricsArray(fullRecords, key as MetricKey));
+      const val = avg(allMatchAggs.map((m) => (m as any)[key]));
       return {
         key: key as MetricKey,
         label: b.label,
