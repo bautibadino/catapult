@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/mongodb";
 import { parseCSV } from "@/lib/csv/parse-csv";
-import { detectColumnMapping, getMappedValue } from "@/lib/csv/normalize-columns";
+import { detectColumnMapping, getMappedValue, getPlayerName, getDurationFromTimes } from "@/lib/csv/normalize-columns";
 import { parseNumeric } from "@/lib/csv/infer-schema";
 import { ImportFile } from "@/models/import-file";
 import { Athlete } from "@/models/athlete";
@@ -88,10 +88,20 @@ async function processSingleFile(data: ImportFileData): Promise<{
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       try {
-        const sessionName = getMappedValue(row, mapping, "session") || `Sesión ${i}`;
+        const sessionName = getMappedValue(row, mapping, "session") || `Sesión importada`;
         const dateRaw = getMappedValue(row, mapping, "date") || new Date().toISOString().slice(0, 10);
-        const playerName = getMappedValue(row, mapping, "player") || `Jugador ${i}`;
-        const team = getMappedValue(row, mapping, "team") || "Sin equipo";
+        let playerName = getPlayerName(row, mapping);
+        if (!playerName) {
+          // Try first column as player name if it looks like a name
+          const firstCol = Object.keys(row)[0];
+          const firstVal = row[firstCol];
+          if (firstVal && firstVal.trim().length > 2 && isNaN(Number(firstVal.trim()))) {
+            playerName = firstVal.trim();
+          } else {
+            playerName = `Jugador ${i + 1}`;
+          }
+        }
+        const team = getMappedValue(row, mapping, "team") || "ADIUR Primera";
         const position = getMappedValue(row, mapping, "position") || undefined;
         const halfRaw = getMappedValue(row, mapping, "half") || "Full";
         const half = ["1st Half", "2nd Half", "Full"].includes(halfRaw)
@@ -111,8 +121,11 @@ async function processSingleFile(data: ImportFileData): Promise<{
           { upsert: true, new: true }
         );
 
+        const durVal = parseNumeric(getMappedValue(row, mapping, "duration"));
+        const duration = durVal > 0 ? durVal : getDurationFromTimes(row, mapping);
+
         const metrics = {
-          dur: parseNumeric(getMappedValue(row, mapping, "duration")),
+          dur: duration,
           dist: parseNumeric(getMappedValue(row, mapping, "dist")),
           m_min: parseNumeric(getMappedValue(row, mapping, "m_min")),
           z3: parseNumeric(getMappedValue(row, mapping, "z3")),
@@ -196,10 +209,11 @@ export async function POST(request: NextRequest) {
 
     const totalImported = results.reduce((s, r) => s + r.importedCount, 0);
 
-    await Athlete.updateMany(
-      {},
-      [{ $set: { sessionsCount: { $size: { $ifNull: ["$sessions", []] } } } }]
-    );
+    const allAthletes = await Athlete.find();
+    for (const athlete of allAthletes) {
+      const sessionCount = await GpsRecord.distinct("sessionId", { athleteId: athlete._id });
+      await Athlete.findByIdAndUpdate(athlete._id, { sessionsCount: sessionCount.length });
+    }
 
     const uniqueSessions = await GpsRecord.distinct("sessionId");
     for (const sessionId of uniqueSessions) {

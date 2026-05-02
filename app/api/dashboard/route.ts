@@ -75,7 +75,7 @@ export async function GET() {
           },
         };
       })
-      .filter((s) => s.athleteCount > 0 && s.promTotal.dist > 0);
+      .filter((s) => s.athleteCount > 0);
 
     const athleteMap: Record<string, any[]> = {};
     for (const r of fullRecords) {
